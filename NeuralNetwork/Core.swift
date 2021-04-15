@@ -28,10 +28,63 @@ struct Dataset {
     var items: [DataItem]
 }
 
-class NeuralNetwork {
+class NeuralNetwork: Codable {
     var layers: [Layer] = []
     var learningRate = Float(0.05)
     var epochs = 30
+    
+    private enum CodingKeys: String, CodingKey {
+        case layers
+        case learningRate
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        let wrappers = layers.map { LayerWrapper($0) }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(wrappers, forKey: .layers)
+        try container.encode(learningRate, forKey: .learningRate)
+    }
+    
+    init(fileName: String) {
+        let decoder = JSONDecoder()
+        let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: url) else {
+            print("Unable to read model from file.")
+            return
+        }
+        guard let decoded = try? decoder.decode(NeuralNetwork.self, from: data) else {
+            print("Unable to decode model.")
+            return
+        }
+        self.layers = decoded.layers
+        self.learningRate = decoded.learningRate
+    }
+    
+    init() {
+        
+    }
+    
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let wrappers = try container.decode([LayerWrapper].self, forKey: .layers)
+        self.layers = wrappers.map { $0.layer }
+        self.learningRate = try container.decode(Float.self, forKey: .learningRate)
+        self.epochs = 30
+    }
+    
+    func saveModel(fileName: String) {
+        let encoder = JSONEncoder()
+        guard let encoded = try? encoder.encode(self) else {
+            print("Unable to encode model.")
+            return
+        }
+        let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(fileName)
+        do {
+            try encoded.write(to: url)
+        } catch {
+            print("Unable to write model to disk.")
+        }
+    }
     
     func train(set: Dataset) {
         for epoch in 0..<epochs {
@@ -115,7 +168,7 @@ class NeuralNetwork {
     }
 }
 
-struct Neuron {
+struct Neuron: Codable {
     var weights: [Float]
     var bias: Float
     var delta: Float
