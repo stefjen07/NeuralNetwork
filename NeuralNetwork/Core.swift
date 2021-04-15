@@ -32,10 +32,14 @@ class NeuralNetwork: Codable {
     var layers: [Layer] = []
     var learningRate = Float(0.05)
     var epochs = 30
+    var batchSize = 16
+    var dropoutEnabled = true
     
     private enum CodingKeys: String, CodingKey {
         case layers
         case learningRate
+        case epochs
+        case batchSize
     }
     
     func encode(to encoder: Encoder) throws {
@@ -43,6 +47,8 @@ class NeuralNetwork: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(wrappers, forKey: .layers)
         try container.encode(learningRate, forKey: .learningRate)
+        try container.encode(epochs, forKey: .epochs)
+        try container.encode(batchSize, forKey: .batchSize)
     }
     
     init(fileName: String) {
@@ -58,6 +64,8 @@ class NeuralNetwork: Codable {
         }
         self.layers = decoded.layers
         self.learningRate = decoded.learningRate
+        self.epochs = decoded.epochs
+        self.batchSize = decoded.batchSize
     }
     
     init() {
@@ -69,7 +77,8 @@ class NeuralNetwork: Codable {
         let wrappers = try container.decode([LayerWrapper].self, forKey: .layers)
         self.layers = wrappers.map { $0.layer }
         self.learningRate = try container.decode(Float.self, forKey: .learningRate)
-        self.epochs = 30
+        self.epochs = try container.decode(Int.self, forKey: .epochs)
+        self.batchSize = try container.decode(Int.self, forKey: .batchSize)
     }
     
     func saveModel(fileName: String) {
@@ -87,9 +96,11 @@ class NeuralNetwork: Codable {
     }
     
     func train(set: Dataset) {
+        dropoutEnabled = true
         for epoch in 0..<epochs {
+            let batch = set.items.shuffled().prefix(batchSize)
             var error = Float.zero
-            for item in set.items {
+            for item in batch {
                 let predictions = forward(networkInput: item.input)
                 for i in 0..<item.output.count {
                     error+=pow(item.output[i]-predictions[i], 2)
@@ -102,6 +113,7 @@ class NeuralNetwork: Codable {
     }
     
     func predict(input: [Float]) -> Int {
+        dropoutEnabled = false
         let output = forward(networkInput: input)
         var maxi = 0
         for i in 1..<output.count {
@@ -134,12 +146,24 @@ class NeuralNetwork: Codable {
         var input = networkInput, newInput = [Float]()
         for i in 0..<layers.count {
             newInput.removeAll()
-            for j in 0..<layers[i].neurons.count {
-                let output = outNeuron(layers[i].neurons[j], input: input)
-                layers[i].neurons[j].output = layers[i].function.activation(input: output)
-                newInput.append(layers[i].neurons[j].output)
+            switch layers[i] {
+            case let layer as Dropout:
+                for j in 0..<input.count {
+                    if dropoutEnabled {
+                        if Float.random(in: 0...1) < layer.probability {
+                            input[j] = 0
+                        }
+                    }
+                    layers[i].neurons[j].output = input[j]
+                }
+            default:
+                for j in 0..<layers[i].neurons.count {
+                    let output = outNeuron(layers[i].neurons[j], input: input)
+                    layers[i].neurons[j].output = layers[i].function.activation(input: output)
+                    newInput.append(layers[i].neurons[j].output)
+                }
+                input = newInput
             }
-            input = newInput
         }
         return input
     }
@@ -147,6 +171,9 @@ class NeuralNetwork: Codable {
     func backward(expected: [Float]) {
         for i in (0..<layers.count).reversed() {
             let layer = layers[i]
+            if layer is Dropout {
+                continue
+            }
             var errors = [Float]()
             if i == layers.count-1 {
                 for j in 0..<layer.neurons.count {
@@ -155,8 +182,10 @@ class NeuralNetwork: Codable {
             } else {
                 for j in 0..<layer.neurons.count {
                     var error = Float.zero
-                    for neuron in layers[i+1].neurons {
-                        error += neuron.weights[j]*neuron.delta
+                    if !(layers[i+1] is Dropout) {
+                        for neuron in layers[i+1].neurons {
+                            error += neuron.weights[j]*neuron.delta
+                        }
                     }
                     errors.append(error)
                 }
