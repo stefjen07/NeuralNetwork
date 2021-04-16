@@ -7,10 +7,6 @@
 
 import Foundation
 
-func transferDerivative(output: Float) -> Float {
-    return output * (1.0-output)
-}
-
 func outNeuron(_ neuron: Neuron, input: [Float]) -> Float {
     var out = neuron.bias
     for i in 0..<neuron.weights.count {
@@ -185,6 +181,7 @@ class NeuralNetwork: Codable {
                 updateWeights(row: item.input)
             }
             print("Epoch \(epoch+1), error \(error).")
+            learningRate -= pow(learningRate, 6)
         }
     }
     
@@ -202,24 +199,9 @@ class NeuralNetwork: Codable {
     }
     
     func updateWeights(row: DataPiece) {
-        var input = row.body
-        for i in 0..<layers.count {
-            #warning("Add convolutional filters updating")
-            if i != 0 {
-                if layers[i-1] is Flatten {
-                    continue
-                }
-                input.removeAll()
-                for neuron in layers[i-1].neurons {
-                    input.append(neuron.output)
-                }
-            }
-            for j in 0..<layers[i].neurons.count {
-                for m in 0..<layers[i].neurons[j].weights.count {
-                    layers[i].neurons[j].weights[m] += learningRate * layers[i].neurons[j].delta * input[m]
-                }
-                layers[i].neurons[j].bias += learningRate * layers[i].neurons[j].delta
-            }
+        var input = row
+        for layer in layers {
+            input = layer.updateWeights(input: input, learningRate: learningRate)
         }
     }
     
