@@ -19,9 +19,68 @@ func outNeuron(_ neuron: Neuron, input: [Float]) -> Float {
     return out
 }
 
+enum DataSizeType {
+    case oneD
+    case twoD
+    case threeD
+}
+
+struct DataSize {
+    var type: DataSizeType
+    var width: Int
+    var height: Int?
+    var depth: Int?
+    
+    init(width: Int) {
+        type = .oneD
+        self.width = width
+    }
+    
+    init(width: Int, height: Int) {
+        type = .twoD
+        self.width = width
+        self.height = height
+    }
+    
+    init(width: Int, height: Int, depth: Int) {
+        type = .threeD
+        self.width = width
+        self.height = height
+        self.depth = depth
+    }
+    
+}
+
+struct DataPiece {
+    var size: DataSize
+    var body: [Float]
+    
+    func get(x: Int) -> Float {
+        return body[x]
+    }
+    
+    func get(x: Int, y: Int) -> Float {
+        return body[x+y*size.width]
+    }
+    
+    func get(x: Int, y: Int, z: Int) -> Float {
+        return body[z+(x+y*size.width)*size.depth!]
+    }
+}
+
 struct DataItem {
-    var input: [Float]
-    var output: [Float]
+    var input: DataPiece
+    var output: DataPiece
+    
+    init(input: DataPiece, output: DataPiece) {
+        self.input = input
+        self.output = output
+    }
+    
+    init(input: [Float], inputSize: DataSize, output: [Float], outputSize: DataSize) {
+        self.input = DataPiece(size: inputSize, body: input)
+        self.output = DataPiece(size: outputSize, body: output)
+    }
 }
 
 struct Dataset {
@@ -40,6 +99,23 @@ class NeuralNetwork: Codable {
         case learningRate
         case epochs
         case batchSize
+    }
+    
+    func printSummary() {
+        for rawLayer in layers {
+            switch rawLayer {
+            case _ as Flatten:
+                print("Flatten layer")
+            case let layer as Convolutional2D:
+                print("Convolutional 2D layer: \(layer.filters.count) filters")
+            case let layer as Dense:
+                print("Dense layer: \(layer.neurons.count) neurons")
+            case let layer as Dropout:
+                print("Dropout layer: \(layer.neurons.count) neurons, \(layer.probability) probability")
+            default:
+                break
+            }
+        }
     }
     
     func encode(to encoder: Encoder) throws {
@@ -102,8 +178,8 @@ class NeuralNetwork: Codable {
             var error = Float.zero
             for item in batch {
                 let predictions = forward(networkInput: item.input)
-                for i in 0..<item.output.count {
-                    error+=pow(item.output[i]-predictions[i], 2)
+                for i in 0..<item.output.body.count {
+                    error+=pow(item.output.body[i]-predictions.body[i], 2)
                 }
                 backward(expected: item.output)
                 updateWeights(row: item.input)
@@ -112,22 +188,27 @@ class NeuralNetwork: Codable {
         }
     }
     
-    func predict(input: [Float]) -> Int {
+    func predict(input: DataPiece) -> Int {
         dropoutEnabled = false
         let output = forward(networkInput: input)
+        #warning("Add more output activation functions")
         var maxi = 0
-        for i in 1..<output.count {
-            if(output[i]>output[maxi]) {
+        for i in 1..<output.body.count {
+            if(output.body[i]>output.body[maxi]) {
                 maxi = i
             }
         }
         return maxi
     }
     
-    func updateWeights(row: [Float]) {
+    func updateWeights(row: DataPiece) {
+        var input = row.body
         for i in 0..<layers.count {
-            var input = row
+            #warning("Add convolutional filters updating")
             if i != 0 {
+                if layers[i-1] is Flatten {
+                    continue
+                }
                 input.removeAll()
                 for neuron in layers[i-1].neurons {
                     input.append(neuron.output)
@@ -142,57 +223,24 @@ class NeuralNetwork: Codable {
         }
     }
     
-    func forward(networkInput: [Float]) -> [Float] {
-        var input = networkInput, newInput = [Float]()
+    func forward(networkInput: DataPiece) -> DataPiece {
+        var input = networkInput
         for i in 0..<layers.count {
-            newInput.removeAll()
-            switch layers[i] {
-            case let layer as Dropout:
-                for j in 0..<input.count {
-                    if dropoutEnabled {
-                        if Float.random(in: 0...1) < layer.probability {
-                            input[j] = 0
-                        }
-                    }
-                    layers[i].neurons[j].output = input[j]
-                }
-            default:
-                for j in 0..<layers[i].neurons.count {
-                    let output = outNeuron(layers[i].neurons[j], input: input)
-                    layers[i].neurons[j].output = layers[i].function.activation(input: output)
-                    newInput.append(layers[i].neurons[j].output)
-                }
-                input = newInput
-            }
+            input = layers[i].forward(input: input, dropoutEnabled: dropoutEnabled)
         }
         return input
     }
     
-    func backward(expected: [Float]) {
+    func backward(expected: DataPiece) {
+        var input = expected
         for i in (0..<layers.count).reversed() {
+            if i<layers.count-1 {
+                if layers[i+1] is Flatten {
+                    continue
+                }
+            }
             let layer = layers[i]
-            if layer is Dropout {
-                continue
-            }
-            var errors = [Float]()
-            if i == layers.count-1 {
-                for j in 0..<layer.neurons.count {
-                    errors.append(expected[j]-layer.neurons[j].output)
-                }
-            } else {
-                for j in 0..<layer.neurons.count {
-                    var error = Float.zero
-                    if !(layers[i+1] is Dropout) {
-                        for neuron in layers[i+1].neurons {
-                            error += neuron.weights[j]*neuron.delta
-                        }
-                    }
-                    errors.append(error)
-                }
-            }
-            for j in 0..<layer.neurons.count {
-                layers[i].neurons[j].delta = errors[j] * transferDerivative(output: layers[i].neurons[j].output)
-            }
+            input = layer.backward(input: input, previous: i<layers.count-1 ? layers[i+1] : nil)
         }
     }
 }
@@ -206,4 +254,23 @@ struct Neuron: Codable {
 
 func derivative(output: Float) -> Float {
     return output*(1.0-output)
+}
+
+func classifierOutput(classes: Int, correct: Int) -> DataPiece {
+    if correct>classes {
+        fatalError("Correct class must be less or equal classes number.")
+    }
+    var output = Array(repeating: Float.zero, count: classes)
+    output[correct-1] = 1.0
+    return DataPiece(size: .init(width: classes), body: output)
+}
+
+func matrixSum(matrix: [[Float]]) -> Float {
+    var output = Float.zero
+    for i in 0..<matrix.count {
+        for j in 0..<matrix[i].count {
+            output += matrix[i][j]
+        }
+    }
+    return output
 }
