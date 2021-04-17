@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct LayerWrapper: Codable {
+public struct LayerWrapper: Codable {
     let layer: Layer
     
     private enum CodingKeys: String, CodingKey {
@@ -26,7 +26,7 @@ struct LayerWrapper: Codable {
         self.layer = layer
     }
     
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch layer {
         case let payload as Dense:
@@ -46,7 +46,7 @@ struct LayerWrapper: Codable {
         }
     }
     
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let base = try container.decode(Base.self, forKey: .base)
         
@@ -64,7 +64,7 @@ struct LayerWrapper: Codable {
 
 }
 
-class Layer: Codable {
+public class Layer: Codable {
     var neurons: [Neuron] = []
     var function: ActivationFunction
     
@@ -73,13 +73,13 @@ class Layer: Codable {
         case function
     }
     
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(function.rawValue, forKey: .function)
         try container.encode(neurons, forKey: .neurons)
     }
     
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let activationRaw = try container.decode(Int.self, forKey: .function)
         function = getActivationFunction(rawValue: activationRaw)
@@ -94,11 +94,15 @@ class Layer: Codable {
         return input
     }
     
-    func updateWeights(input: DataPiece, learningRate: Float) -> DataPiece {
+    func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
         return input
     }
     
-    init(function: ActivationFunction) {
+    func updateWeights() {
+        return
+    }
+    
+    public init(function: ActivationFunction) {
         self.function = function
     }
 }
@@ -106,6 +110,7 @@ class Layer: Codable {
 class Filter: Codable {
     var kernel: [[Float]]
     var output: [[Float]]
+    var delta: [[Float]]
     
     func apply(to piece: [[Float]]) -> [[Float]] {
         if piece.count != kernel.count {
@@ -123,27 +128,30 @@ class Filter: Codable {
         return output
     }
     
-    init(kernelSize: Int) {
+    public init(kernelSize: Int) {
         kernel = []
         output = []
+        delta = []
         for _ in 0..<kernelSize {
-            var row = [Float]()
+            var row = [Float](), deltaRow = [Float]()
             for _ in 0..<kernelSize {
                 row.append(Float.random(in: -1...1))
+                deltaRow.append(Float.zero)
             }
             kernel.append(row)
+            delta.append(deltaRow)
         }
     }
 }
 
-class Flatten: Layer {
+public class Flatten: Layer {
     private var output: DataPiece?
     
-    init() {
+    public init() {
         super.init(function: Plain())
     }
     
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         try super.init(from: decoder)
     }
     
@@ -163,9 +171,13 @@ class Flatten: Layer {
     override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
         return output!
     }
+    
+    override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
+        return output!
+    }
 }
 
-class Convolutional2D: Layer {
+public class Convolutional2D: Layer {
     var filters: [Filter]
     var filterErrors: [Float]
     var kernelSize: Int
@@ -180,7 +192,7 @@ class Convolutional2D: Layer {
         case errors
     }
     
-    override func encode(to encoder: Encoder) throws {
+    public override func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(filters, forKey: .filters)
         try container.encode(kernelSize, forKey: .kernelSize)
@@ -189,8 +201,7 @@ class Convolutional2D: Layer {
         try super.encode(to: encoder)
     }
     
-    required init(from decoder: Decoder) throws {
-        print("Convolutional 2D is unstable now. Try to avoid it.")
+    public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.filters = try container.decode([Filter].self, forKey: .filters)
         self.kernelSize = try container.decode(Int.self, forKey: .kernelSize)
@@ -199,8 +210,7 @@ class Convolutional2D: Layer {
         try super.init(from: decoder)
     }
     
-    init(filters: Int, kernelSize: Int, stride: Int, functionRaw: ActivationFunctionRaw) {
-        print("Convolutional 2D is unstable now. Try to avoid it.")
+    public init(filters: Int, kernelSize: Int, stride: Int, functionRaw: ActivationFunctionRaw) {
         let function = getActivationFunction(rawValue: functionRaw.rawValue)
         self.filters = []
         self.kernelSize = kernelSize
@@ -240,7 +250,7 @@ class Convolutional2D: Layer {
         }
         var flat = [Float]()
         for i in output {
-            flat.append(contentsOf: i.map { function.activation(input: $0) })
+            flat.append(contentsOf: i.map { $0 })
         }
         self.output = DataPiece(size: outputSize, body: flat)
         return self.output!
@@ -262,6 +272,7 @@ class Convolutional2D: Layer {
         for filter in filters {
             var error = Float.zero
             var tempY = 0, outY = 0
+            var filterOutput = Array(repeating: Array(repeating: Float.zero, count: inputSize.height!), count: inputSize.width)
             while tempY + kernelSize <= inputSize.height! {
                 var tempX = 0, outX = 0
                 while tempX + kernelSize <= inputSize.width {
@@ -274,6 +285,17 @@ class Convolutional2D: Layer {
                         piece.append(column)
                     }
                     error += matrixSum(matrix: piece) * resizedInput.get(x: outX, y: outY)
+                    var tempKernel = filter.kernel
+                    for i in 0..<tempKernel.count {
+                        for j in 0..<tempKernel[i].count {
+                            tempKernel[i][j] *= resizedInput.get(x: outX, y: outY)
+                        }
+                    }
+                    for y in tempY ..< tempY + kernelSize {
+                        for x in tempX ..< tempX + kernelSize {
+                            filterOutput[y][x] += resizedInput.get(x: outX, y: outY) * filter.kernel[y-tempY][x-tempX]
+                        }
+                    }
                     tempX += stride
                     outX += 1
                 }
@@ -281,27 +303,37 @@ class Convolutional2D: Layer {
                 outY += 1
             }
             filterErrors.append(error)
-            output.append(filter.output)
+            output.append(filterOutput)
         }
-        return DataPiece(size: .init(width: filters.count, height: output[0].count, depth: output[0][0].count), body: output.flatMap { $0.flatMap { $0 } })
+        return DataPiece(size: .init(width: output[0].count, height: output[0][0].count, depth: filters.count), body: output.flatMap { $0.flatMap { $0 } })
     }
     
-    override func updateWeights(input: DataPiece, learningRate: Float) -> DataPiece {
+    override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
         for i in 0..<filters.count {
-            filters[i].kernel = filters[i].kernel.map { x in
-                return x.map { y in
-                    return y - learningRate * filterErrors[i]
+            for x in 0..<filters[i].kernel.count {
+                for y in 0..<filters[i].kernel[x].count {
+                    filters[i].delta[x][y] += learningRate * filterErrors[i]
                 }
             }
         }
         return output!
     }
     
+    override func updateWeights() {
+        for i in 0..<filters.count {
+            for x in 0..<filters[i].kernel.count {
+                for y in 0..<filters[i].kernel[x].count {
+                    filters[i].kernel[x][y] += filters[i].delta[x][y]
+                }
+            }
+        }
+    }
+    
 }
 
-class Dense: Layer {
+public class Dense: Layer {
     
-    init(inputSize: Int, neuronsCount: Int, functionRaw: ActivationFunctionRaw) {
+    public init(inputSize: Int, neuronsCount: Int, functionRaw: ActivationFunctionRaw) {
         let function = getActivationFunction(rawValue: functionRaw.rawValue)
         
         super.init(function: function)
@@ -311,11 +343,11 @@ class Dense: Layer {
             for _ in 0..<inputSize {
                 weights.append(Float.random(in: -1.0 ... 1.0))
             }
-            neurons.append(Neuron(weights: weights, bias: 0.0, delta: 0.0, output: 0.0))
+            neurons.append(Neuron(weights: weights, weightsDelta: .init(repeating: Float.zero, count: weights.count), bias: 0.0, delta: 0.0, output: 0.0))
         }
     }
     
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         try super.init(from: decoder)
     }
     
@@ -349,51 +381,54 @@ class Dense: Layer {
         for j in 0..<neurons.count {
             neurons[j].delta = errors[j] * function.derivation(output: neurons[j].output)
         }
-        var output = [Float]()
-        for neuron in neurons {
-            output.append(neuron.output)
-        }
-        return DataPiece(size: .init(width: output.count), body: output)
+        return DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
     }
     
-    override func updateWeights(input: DataPiece, learningRate: Float) -> DataPiece {
+    override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
         for j in 0..<neurons.count {
             for m in 0..<neurons[j].weights.count {
-                neurons[j].weights[m] += learningRate * neurons[j].delta * input.body[m]
+                neurons[j].weightsDelta[m] += learningRate * neurons[j].delta * input.body[m]
             }
             neurons[j].bias += learningRate * neurons[j].delta
         }
-        var output = [Float]()
-        for neuron in neurons {
-            output.append(neuron.output)
+        return DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
+    }
+    
+    override func updateWeights() {
+        for i in 0..<neurons.count {
+            for j in 0..<neurons[i].weightsDelta.count {
+                neurons[i].weights[j] += neurons[i].weightsDelta[j]
+                neurons[i].weightsDelta[j] = 0
+            }
         }
-        return DataPiece(size: .init(width: output.count), body: output)
     }
     
 }
 
-class Dropout: Layer {
+public class Dropout: Layer {
     var probability: Float
     
     private enum CodingKeys: String, CodingKey {
         case probability
     }
     
-    override func encode(to encoder: Encoder) throws {
+    public override func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(probability, forKey: .probability)
         try super.encode(to: encoder)
     }
     
-    init(inputSize: Int, probability: Float) {
+    public init(inputSize: Int, probability: Float) {
+        print("Dropout is unstable now. Try to avoid it.")
         self.probability = probability
         super.init(function: Plain())
         for _ in 0..<inputSize {
-            neurons.append(Neuron(weights: [], bias: 0.0, delta: 0.0, output: 0.0))
+            neurons.append(Neuron(weights: [], weightsDelta: [], bias: 0.0, delta: 0.0, output: 0.0))
         }
     }
     
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
+        print("Dropout is unstable now. Try to avoid it.")
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.probability = try container.decode(Float.self, forKey: .probability)
         try super.init(from: decoder)
@@ -401,15 +436,39 @@ class Dropout: Layer {
     
     override func forward(input: DataPiece, dropoutEnabled: Bool) -> DataPiece {
         var output = input
-        for j in 0..<output.body.count {
-            if dropoutEnabled {
-                if Float.random(in: 0...1) < probability {
-                    output.body[j] = 0
-                }
+        let dropRate = Int(Float(output.body.count) * probability)
+        var lot = [Int]()
+        for i in output.body.indices {
+            lot.append(i)
+        }
+        while lot.count > dropRate {
+            lot.remove(at: Int.random(in: 0..<lot.count))
+        }
+        if dropoutEnabled {
+            var sum = Float.zero, fullSum = Float.zero
+            for i in lot {
+                fullSum += output.body[i]
+                output.body[i] = 0
             }
-            neurons[j].output = output.body[j]
+            for i in 0..<output.body.count {
+                sum += output.body[i]
+                fullSum += output.body[i]
+            }
+            let rate = fullSum/sum
+            for i in 0..<output.body.count {
+                output.body[i] *= rate
+                neurons[i].output = output.body[i]
+            }
         }
         return output
+    }
+    
+    override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
+        return DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
+    }
+    
+    override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
+        return DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
     }
 }
 
@@ -426,50 +485,50 @@ func getActivationFunction(rawValue: Int) -> ActivationFunction {
     }
 }
 
-enum ActivationFunctionRaw: Int {
+public enum ActivationFunctionRaw: Int {
     case sigmoid = 0
     case reLU
     case plain
 }
 
-protocol ActivationFunction: Codable {
+public protocol ActivationFunction: Codable {
     var rawValue: Int { get }
     func activation(input: Float) -> Float
     func derivation(output: Float) -> Float
 }
 
-struct Sigmoid: ActivationFunction, Codable {
-    var rawValue: Int = 0
+public struct Sigmoid: ActivationFunction, Codable {
+    public var rawValue: Int = 0
     
-    func activation(input: Float) -> Float {
+    public func activation(input: Float) -> Float {
         return 1.0/(1.0+exp(-input))
     }
     
-    func derivation(output: Float) -> Float {
+    public func derivation(output: Float) -> Float {
         return output * (1.0-output)
     }
 }
 
-struct ReLU: ActivationFunction, Codable {
-    var rawValue: Int = 1
+public struct ReLU: ActivationFunction, Codable {
+    public var rawValue: Int = 1
     
-    func activation(input: Float) -> Float {
+    public func activation(input: Float) -> Float {
         return max(Float.zero, input)
     }
     
-    func derivation(output: Float) -> Float {
+    public func derivation(output: Float) -> Float {
         return output < 0 ? 0 : 1
     }
 }
 
-struct Plain: ActivationFunction, Codable {
-    var rawValue: Int = 2
+public struct Plain: ActivationFunction, Codable {
+    public var rawValue: Int = 2
     
-    func activation(input: Float) -> Float {
+    public func activation(input: Float) -> Float {
         return input
     }
     
-    func derivation(output: Float) -> Float {
+    public func derivation(output: Float) -> Float {
         return 1
     }
 }

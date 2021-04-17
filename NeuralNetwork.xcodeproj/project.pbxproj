@@ -3,13 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 52;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		3E256C7926285416000F306F /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E256C7826285416000F306F /* main.swift */; };
-		3E256C802628549A000F306F /* Layers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E256C7F2628549A000F306F /* Layers.swift */; };
-		3E256C82262876C9000F306F /* Core.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E256C81262876C9000F306F /* Core.swift */; };
+		3E7E54AB262AE09000863D66 /* NeuralNetworkLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 3E7E54AA262AE09000863D66 /* NeuralNetworkLibrary */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -27,8 +26,6 @@
 /* Begin PBXFileReference section */
 		3E256C7526285416000F306F /* NeuralNetwork */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = NeuralNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		3E256C7826285416000F306F /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		3E256C7F2628549A000F306F /* Layers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Layers.swift; sourceTree = "<group>"; };
-		3E256C81262876C9000F306F /* Core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,6 +33,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3E7E54AB262AE09000863D66 /* NeuralNetworkLibrary in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,6 +45,7 @@
 			children = (
 				3E256C7726285416000F306F /* NeuralNetwork */,
 				3E256C7626285416000F306F /* Products */,
+				3E7E54A7262AD01600863D66 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,10 +61,15 @@
 			isa = PBXGroup;
 			children = (
 				3E256C7826285416000F306F /* main.swift */,
-				3E256C7F2628549A000F306F /* Layers.swift */,
-				3E256C81262876C9000F306F /* Core.swift */,
 			);
 			path = NeuralNetwork;
+			sourceTree = "<group>";
+		};
+		3E7E54A7262AD01600863D66 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -84,6 +88,9 @@
 			dependencies = (
 			);
 			name = NeuralNetwork;
+			packageProductDependencies = (
+				3E7E54AA262AE09000863D66 /* NeuralNetworkLibrary */,
+			);
 			productName = NeuralNetwork;
 			productReference = 3E256C7526285416000F306F /* NeuralNetwork */;
 			productType = "com.apple.product-type.tool";
@@ -125,9 +132,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3E256C82262876C9000F306F /* Core.swift in Sources */,
 				3E256C7926285416000F306F /* main.swift in Sources */,
-				3E256C802628549A000F306F /* Layers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,6 +298,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3E7E54AA262AE09000863D66 /* NeuralNetworkLibrary */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NeuralNetworkLibrary;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 3E256C6D26285416000F306F /* Project object */;
 }
