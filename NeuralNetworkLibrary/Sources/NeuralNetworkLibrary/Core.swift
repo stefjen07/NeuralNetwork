@@ -15,13 +15,13 @@ func outNeuron(_ neuron: Neuron, input: [Float]) -> Float {
     return out
 }
 
-public enum DataSizeType {
-    case oneD
+public enum DataSizeType: Int, Codable {
+    case oneD = 1
     case twoD
     case threeD
 }
 
-public struct DataSize {
+public struct DataSize: Codable {
     var type: DataSizeType
     var width: Int
     var height: Int?
@@ -47,7 +47,7 @@ public struct DataSize {
     
 }
 
-public struct DataPiece: Equatable {
+public struct DataPiece: Codable, Equatable {
     public static func == (lhs: DataPiece, rhs: DataPiece) -> Bool {
         return lhs.body == rhs.body
     }
@@ -81,9 +81,28 @@ public struct DataPiece: Equatable {
         self.size = size
         self.body = body
     }
+    
+    public init(image: CGImage) {
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        let width = 32
+        let height = 32
+        let bitsPerComponent = image.bitsPerComponent
+        let bytesPerRow = image.bytesPerRow
+        let totalBytes = height * bytesPerRow
+        let buffer = Array(repeating: UInt8.zero, count: totalBytes)
+        let mutablePointer = UnsafeMutablePointer<UInt8>(mutating: buffer)
+        let contextRef = CGContext(data: mutablePointer, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: 0)!
+        contextRef.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let bufferPointer = UnsafeBufferPointer<UInt8>(start: mutablePointer, count: totalBytes)
+        self.size = .init(width: width, height: height)
+        let pixelValues = Array<UInt8>(bufferPointer)
+        self.body = pixelValues.map { v in
+            return Float(v)/Float(UInt8.max)
+        }
+    }
 }
 
-public struct DataItem {
+public struct DataItem: Codable {
     var input: DataPiece
     var output: DataPiece
     
@@ -98,11 +117,79 @@ public struct DataItem {
     }
 }
 
-public struct Dataset {
+public struct Dataset: Codable {
     public var items: [DataItem]
+    
+    public func save(to url: URL) {
+        let encoder = JSONEncoder()
+        guard let encoded = try? encoder.encode(self) else {
+            print("Unable to encode model.")
+            return
+        }
+        do {
+            try encoded.write(to: url)
+        } catch {
+            print("Unable to write model to disk.")
+        }
+    }
+    
+    public init(from url: URL) {
+        let decoder = JSONDecoder()
+        guard let data = try? Data(contentsOf: url) else {
+            fatalError("Unable to get data from Dataset file.")
+        }
+        guard let decoded = try? decoder.decode(Dataset.self, from: data) else {
+            fatalError("Unable to decode data from Dataset file.")
+        }
+        self.items = decoded.items
+    }
     
     public init(items: [DataItem]) {
         self.items = items
+    }
+    
+    public init(folderPath: String) {
+        self.items = []
+        let manager = FileManager.default
+        var inputs = [DataPiece]()
+        var outputs = [Int]()
+        var classCount = 0
+        do {
+            for content in try manager.contentsOfDirectory(atPath: folderPath) {
+                let isDirectory = UnsafeMutablePointer<ObjCBool>.allocate(capacity: 1)
+                let path = folderPath+"/"+content
+                if manager.fileExists(atPath: path, isDirectory: UnsafeMutablePointer<ObjCBool>(isDirectory)) {
+                    if isDirectory.pointee.boolValue {
+                        for file in try manager.contentsOfDirectory(atPath: path) {
+                            let isDirectory = UnsafeMutablePointer<ObjCBool>.allocate(capacity: 1)
+                            let path = path+"/"+file
+                            if manager.fileExists(atPath: path, isDirectory: UnsafeMutablePointer<ObjCBool>(isDirectory)) {
+                                if !isDirectory.pointee.boolValue {
+                                    let url = URL(fileURLWithPath: path)
+                                    let splits = file.split(separator: ".")
+                                    if splits.count < 2 {
+                                        continue
+                                    }
+                                    if splits.last  == "png" {
+                                        let data = try Data(contentsOf: url)
+                                        guard let provider = CGDataProvider(data: NSData(data: data)) else { fatalError() }
+                                        guard let image = CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { fatalError() }
+                                        inputs.append(.init(image: image))
+                                        outputs.append(classCount)
+                                    }
+                                }
+                            }
+                        }
+                        classCount += 1
+                    }
+                }
+            }
+        } catch {
+            fatalError(error.localizedDescription)
+        }
+        for i in 0..<inputs.count {
+            items.append(.init(input: inputs[i], output: classifierOutput(classes: classCount, correct: outputs[i])))
+        }
     }
 }
 
