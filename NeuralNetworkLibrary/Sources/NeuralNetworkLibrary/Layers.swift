@@ -224,33 +224,43 @@ public class Convolutional2D: Layer {
     
     override func forward(input: DataPiece, dropoutEnabled: Bool) -> DataPiece {
         lastInput = input
-        let inputSize = DataSize(width: input.size.width, height: input.size.height ?? input.size.width)
-        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1)
-        var output = Array(repeating: Array(repeating: Float.zero, count: outputSize.width), count: outputSize.height!)
-        for filter in filters {
-            var tempY = 0, outY = 0
-            while tempY + kernelSize <= inputSize.height! {
-                var tempX = 0, outX = 0
-                while tempX + kernelSize <= inputSize.width {
-                    var piece = [[Float]]()
-                    for y in tempY ..< tempY + kernelSize {
-                        var column = [Float]()
-                        for x in tempX ..< tempX + kernelSize {
-                            column.append(input.get(x: x, y: y))
+        if input.size.type == .twoD {
+            lastInput?.size = DataSize(width: input.size.width, height: input.size.height!, depth: 1)
+        } else if input.size.type == .oneD {
+            fatalError("Convolutional 2D input must be at least two-dimensional.")
+        }
+        
+        let inputSize = lastInput!.size
+        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1, depth: filters.count*inputSize.depth!)
+        var output = Array(repeating: Array(repeating: Array(repeating: Float.zero, count: outputSize.depth!), count: outputSize.width), count: outputSize.height!)
+        var tempY = 0, outY = 0
+        while tempY + kernelSize <= inputSize.height! {
+            var tempX = 0, outX = 0
+            while tempX + kernelSize <= inputSize.width {
+                for filter in 0..<filters.count {
+                    for depth in 0..<inputSize.depth! {
+                        var piece = [[Float]]()
+                        for y in tempY ..< tempY + kernelSize {
+                            var column = [Float]()
+                            for x in tempX ..< tempX + kernelSize {
+                                column.append(lastInput!.get(x: x, y: y, z: depth))
+                            }
+                            piece.append(column)
                         }
-                        piece.append(column)
+                        output[outY][outX][filter*inputSize.depth! + depth] = function.activation(input: matrixSum(matrix: filters[filter].apply(to: piece)))
                     }
-                    output[outY][outX] = function.activation(input: matrixSum(matrix: filter.apply(to: piece)))
-                    tempX += stride
-                    outX += 1
                 }
-                tempY += stride
-                outY += 1
+                tempX += stride
+                outX += 1
             }
+            tempY += stride
+            outY += 1
         }
         var flat = [Float]()
         for i in output {
-            flat.append(contentsOf: i.map { $0 })
+            for j in i {
+                flat.append(contentsOf: j)
+            }
         }
         self.output = DataPiece(size: outputSize, body: flat)
         return self.output!
@@ -358,7 +368,7 @@ public class Dense: Layer {
             neurons[j].output = function.activation(input: output)
             newInput.append(neurons[j].output)
         }
-        return DataPiece(size: input.size, body: newInput)
+        return DataPiece(size: .init(width: newInput.count), body: newInput)
     }
     
     override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
@@ -366,10 +376,8 @@ public class Dense: Layer {
         if let previous = previous {
             for j in 0..<neurons.count {
                 var error = Float.zero
-                if !(previous is Dropout) {
-                    for neuron in previous.neurons {
-                        error += neuron.weights[j]*neuron.delta
-                    }
+                for neuron in previous.neurons {
+                    error += neuron.weights[j]*neuron.delta
                 }
                 errors.append(error)
             }
@@ -407,20 +415,23 @@ public class Dense: Layer {
 
 public class Dropout: Layer {
     var probability: Float
+    var cache: [Bool]
     
     private enum CodingKeys: String, CodingKey {
         case probability
+        case cache
     }
     
     public override func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(probability, forKey: .probability)
+        try container.encode(cache, forKey: .cache)
         try super.encode(to: encoder)
     }
     
     public init(inputSize: Int, probability: Float) {
-        print("Dropout is unstable now. Try to avoid it.")
         self.probability = probability
+        self.cache = Array(repeating: true, count: inputSize)
         super.init(function: Plain())
         for _ in 0..<inputSize {
             neurons.append(Neuron(weights: [], weightsDelta: [], bias: 0.0, delta: 0.0, output: 0.0))
@@ -428,43 +439,36 @@ public class Dropout: Layer {
     }
     
     public required init(from decoder: Decoder) throws {
-        print("Dropout is unstable now. Try to avoid it.")
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.probability = try container.decode(Float.self, forKey: .probability)
+        self.cache = try container.decode([Bool].self, forKey: .cache)
         try super.init(from: decoder)
     }
     
     override func forward(input: DataPiece, dropoutEnabled: Bool) -> DataPiece {
         var output = input
-        let dropRate = Int(Float(output.body.count) * probability)
-        var lot = [Int]()
-        for i in output.body.indices {
-            lot.append(i)
-        }
-        while lot.count > dropRate {
-            lot.remove(at: Int.random(in: 0..<lot.count))
-        }
-        if dropoutEnabled {
-            var sum = Float.zero, fullSum = Float.zero
-            for i in lot {
-                fullSum += output.body[i]
-                output.body[i] = 0
+        for j in 0..<output.body.count {
+            if dropoutEnabled {
+                if Float.random(in: 0...1) < probability {
+                    cache[j] = false
+                    output.body[j] = 0
+                } else {
+                    cache[j] = true
+                }
             }
-            for i in 0..<output.body.count {
-                sum += output.body[i]
-                fullSum += output.body[i]
-            }
-            let rate = fullSum/sum
-            for i in 0..<output.body.count {
-                output.body[i] *= rate
-                neurons[i].output = output.body[i]
-            }
+            neurons[j].output = output.body[j]
         }
         return output
     }
     
     override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
-        return DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
+        var output = DataPiece(size: .init(width: neurons.count), body: neurons.map { $0.output })
+        for i in 0..<neurons.count {
+            if !cache[i] {
+                output.body[i] = 0
+            }
+        }
+        return output
     }
     
     override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {

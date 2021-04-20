@@ -68,6 +68,16 @@ public struct DataPiece: Equatable {
     }
     
     public init(size: DataSize, body: [Float]) {
+        var flatSize = size.width
+        if let height = size.height {
+            flatSize *= height
+        }
+        if let depth = size.depth {
+            flatSize *= depth
+        }
+        if flatSize != body.count {
+            fatalError("DataPiece body does not conform to DataSize.")
+        }
         self.size = size
         self.body = body
     }
@@ -190,7 +200,7 @@ public class NeuralNetwork: Codable {
                 for item in batch {
                     let predictions = forward(networkInput: item.input)
                     for i in 0..<item.output.body.count {
-                        error+=pow(item.output.body[i]-predictions.body[i], 2)
+                        error+=pow(item.output.body[i]-predictions.body[i], 2)/2
                     }
                     backward(expected: item.output)
                     deltaWeights(row: item.input)
@@ -234,8 +244,12 @@ public class NeuralNetwork: Codable {
     
     func backward(expected: DataPiece) {
         var input = expected
+        var previous: Layer? = nil
         for i in (0..<layers.count).reversed() {
-            input = layers[i].backward(input: input, previous: i<layers.count-1 ? layers[i+1] : nil)
+            input = layers[i].backward(input: input, previous: previous)
+            if !(layers[i] is Dropout) {
+                previous = layers[i]
+            }
         }
     }
 }

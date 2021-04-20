@@ -22,13 +22,11 @@ if usingFile && !eraseFile {
     network.learningRate = 0.5
     network.epochs = 1000
     network.layers = [
-        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
-        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
+        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .sigmoid),
         Flatten(),
         Dense(inputSize: 4, neuronsCount: 6, functionRaw: .sigmoid),
-        Dense(inputSize: 6, neuronsCount: 12, functionRaw: .sigmoid),
-        //Dropout(inputSize: 12, probability: 0),
-        Dense(inputSize: 12, neuronsCount: 2, functionRaw: .sigmoid)
+        Dropout(inputSize: 6, probability: 0.1),
+        Dense(inputSize: 6, neuronsCount: 2, functionRaw: .sigmoid)
     ]
 }
 
@@ -38,7 +36,7 @@ let set = Dataset(items: [
     DataItem(input: [0.0, 0.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
     DataItem(input: [0.0, 0.0, 0.0, 1.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 0).body, outputSize: .init(width: 2)),
     DataItem(input: [0.0, 0.0, 1.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
-    DataItem(input: [1.0, 1.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
+    DataItem(input: [0.0, 1.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
     DataItem(input: [1.0, 1.0, 1.0, 1.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 0).body, outputSize: .init(width: 2))
 ])
 
@@ -58,3 +56,12 @@ if usingFile {
     network.saveModel(fileName: fileName)
     print("Model saved.")
 }
+
+//Non-dropout
+//1.7343979
+//1.2855911
+
+//Dropout
+//1.3407227
+//1.4222838
+//1.6375583

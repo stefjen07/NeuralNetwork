@@ -47,8 +47,8 @@
             let forward = endDense.forward(input: dense.forward(input: item.output, dropoutEnabled: true), dropoutEnabled: true)
             XCTAssertEqual(forwardDrop, forward)
             
-            let resDrop = dense.backward(input: dropout.backward(input: endDense.backward(input: item.input, previous: nil), previous: nil), previous: dropout)
-            let res = dense.backward(input: endDense.backward(input: item.input, previous: nil), previous: nil)
+            let resDrop = dense.backward(input: dropout.backward(input: endDense.backward(input: item.input, previous: nil), previous: endDense), previous: endDense)
+            let res = dense.backward(input: endDense.backward(input: item.input, previous: nil), previous: endDense)
             XCTAssertEqual(resDrop, res)
             
             let tempDense = dense
