@@ -3,16 +3,6 @@
 
     final class NeuralNetworkLibraryTests: XCTestCase {
         
-        func testMatrixSum() throws {
-            let matrix: [[Float]] = [
-                [1,2],
-                [3,4],
-            ]
-            let expected: Float = 10
-            let result = matrixSum(matrix: matrix)
-            XCTAssertEqual(result, expected)
-        }
-        
         func testClassifierOutput() throws {
             let classes = 5, correct = 2
             let expected: [Float] = [0, 0, 1, 0, 0]
@@ -62,5 +52,29 @@
             endDense.updateWeights()
             
             XCTAssertEqual(tempEnd.neurons.map { $0.weights }, endDense.neurons.map { $0.weights })
+        }
+        
+        func testPerformanceFilterApply() throws {
+            let size = 100
+            let filter = Filter(kernelSize: size)
+            var input = Array(repeating: Float.random(in: -20...20), count: size*size)
+            measure {
+                for _ in 0..<100 {
+                    input = filter.apply(to: input)
+                }
+            }
+        }
+        
+        func testFunctions() throws {
+            let val = Float.random(in: -1000...1000)
+            XCTAssertEqual(val / Plain().activation(input: val), Plain().derivative(output: val))
+            XCTAssertEqual(val < 0 ? 0 : val, ReLU().activation(input: val))
+            XCTAssertEqual(val < 0, ReLU().derivative(output: val) == 0)
+            XCTAssertEqual(val >= 0, ReLU().derivative(output: 0-val) == 0)
+            XCTAssertEqual(1.0/(1+exp(0-val)), Sigmoid().activation(input: val))
+            XCTAssertEqual(val*(1-val), Sigmoid().derivative(output: val))
+            XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.plain.rawValue).activation(input: val), Plain().activation(input: val))
+            XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.reLU.rawValue).activation(input: val), ReLU().activation(input: val))
+            XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.sigmoid.rawValue).activation(input: val), Sigmoid().activation(input: val))
         }
     }

@@ -94,11 +94,10 @@ public struct DataPiece: Codable, Equatable {
         let bitsPerComponent = image.bitsPerComponent
         let bytesPerRow = image.bytesPerRow
         let totalBytes = height * bytesPerRow
-        let buffer = Array(repeating: UInt8.zero, count: totalBytes)
-        let mutablePointer = UnsafeMutablePointer<UInt8>(mutating: buffer)
-        let contextRef = CGContext(data: mutablePointer, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: 0)!
+        var buffer = Array(repeating: UInt8.zero, count: totalBytes)
+        let contextRef = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: 0)!
         contextRef.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let bufferPointer = UnsafeBufferPointer<UInt8>(start: mutablePointer, count: totalBytes)
+        let bufferPointer = UnsafeBufferPointer<UInt8>(start: &buffer, count: totalBytes)
         self.size = .init(width: width, height: height)
         let pixelValues = Array<UInt8>(bufferPointer)
         self.body = pixelValues.map { v in
@@ -360,18 +359,4 @@ public func classifierOutput(classes: Int, correct: Int) -> DataPiece {
     var output = Array(repeating: Float.zero, count: classes)
     output[correct] = 1.0
     return DataPiece(size: .init(width: classes), body: output)
-}
-
-func matrixSum(matrix: [[Float]]) -> Float {
-    var output = Float.zero
-    matrix.withUnsafeBufferPointer { matrixPtr in
-        DispatchQueue.concurrentPerform(iterations: matrixPtr.count, execute: { i in
-            matrixPtr[i].withUnsafeBufferPointer { matrixRowPtr in
-                DispatchQueue.concurrentPerform(iterations: matrixRowPtr.count, execute: { j in
-                    output += matrixRowPtr[j]
-                })
-            }
-        })
-    }
-    return output
 }

@@ -35,10 +35,8 @@ if usingFile && !eraseFile {
 network.printSummary()
 
 var set = getDS()
-set.items.shuffle()
-set.items = .init(set.items.dropFirst(64))
 
-network.train(set: set)
+network.train(set: .init(items: .init(set.items.shuffled().dropFirst(16))))
 
 if usingFile {
     network.saveModel(fileName: fileName)
