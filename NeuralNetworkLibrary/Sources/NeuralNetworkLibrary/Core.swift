@@ -9,8 +9,13 @@ import Foundation
 
 func outNeuron(_ neuron: Neuron, input: [Float]) -> Float {
     var out = neuron.bias
-    for i in 0..<neuron.weights.count {
-        out += neuron.weights[i] * input[i]
+    let weightsCount = neuron.weights.count
+    input.withUnsafeBufferPointer { inputPtr in
+        neuron.weights.withUnsafeBufferPointer { weightsPtr in
+            DispatchQueue.concurrentPerform(iterations: weightsCount, execute: { i in
+                out += weightsPtr[i] * inputPtr[i]
+            })
+        }
     }
     return out
 }
@@ -346,7 +351,6 @@ struct Neuron: Codable {
     var weightsDelta: [Float]
     var bias: Float
     var delta: Float
-    var output: Float
 }
 
 public func classifierOutput(classes: Int, correct: Int) -> DataPiece {
@@ -360,10 +364,14 @@ public func classifierOutput(classes: Int, correct: Int) -> DataPiece {
 
 func matrixSum(matrix: [[Float]]) -> Float {
     var output = Float.zero
-    for i in 0..<matrix.count {
-        for j in 0..<matrix[i].count {
-            output += matrix[i][j]
-        }
+    matrix.withUnsafeBufferPointer { matrixPtr in
+        DispatchQueue.concurrentPerform(iterations: matrixPtr.count, execute: { i in
+            matrixPtr[i].withUnsafeBufferPointer { matrixRowPtr in
+                DispatchQueue.concurrentPerform(iterations: matrixRowPtr.count, execute: { j in
+                    output += matrixRowPtr[j]
+                })
+            }
+        })
     }
     return output
 }

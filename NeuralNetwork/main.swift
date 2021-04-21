@@ -26,28 +26,19 @@ if usingFile && !eraseFile {
     network.layers = [
         Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
         Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
-        Flatten(),
-        Dense(inputSize: 1024, neuronsCount: 256, functionRaw: .reLU),
-        Dropout(inputSize: 256, probability: 0.1),
-        Dense(inputSize: 256, neuronsCount: 71, functionRaw: .reLU)
+        Flatten(inputSize: 1024),
+        Dropout(inputSize: 1024, probability: 0.1),
+        Dense(inputSize: 1024, neuronsCount: 71, functionRaw: .reLU)
     ]
 }
 
 network.printSummary()
 
 var set = getDS()
+set.items.shuffle()
+set.items = .init(set.items.dropFirst(64))
 
 network.train(set: set)
-
-for x in 0...1 {
-    for y in 0...1 {
-        for z in 0...1 {
-            for q in 0...1 {
-                print("Prediction for [\(x),\(y),\(z),\(q)]: ", network.predict(input: .init(size: .init(width: 2, height: 2), body: [Float(x), Float(y), Float(z), Float(q)])))
-            }
-        }
-    }
-}
 
 if usingFile {
     network.saveModel(fileName: fileName)

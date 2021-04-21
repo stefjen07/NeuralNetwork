@@ -30,7 +30,7 @@
         }
         
         func testOutNeuron() throws {
-            let neuron = Neuron(weights: [0.2, 0.3], weightsDelta: [0.0, 0.0], bias: 0.0, delta: 0.0, output: 0.0)
+            let neuron = Neuron(weights: [0.2, 0.3], weightsDelta: [0.0, 0.0], bias: 0.0, delta: 0.0)
             let input: [Float] = [0.5, 0.3]
             let result = outNeuron(neuron, input: input)
             let expected = Float(0.19)
