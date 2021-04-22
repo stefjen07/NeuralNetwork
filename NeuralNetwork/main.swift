@@ -25,7 +25,6 @@ if usingFile && !eraseFile {
     network.epochs = 10
     network.layers = [
         Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
-        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
         Flatten(inputSize: 1024),
         Dropout(inputSize: 1024, probability: 0.1),
         Dense(inputSize: 1024, neuronsCount: 71, functionRaw: .reLU)

@@ -281,11 +281,12 @@ public class NeuralNetwork: Codable {
         }
     }
     
-    public func train(set: Dataset) {
+    public func train(set: Dataset) -> Float {
         dropoutEnabled = true
+        var error = Float.zero
         for epoch in 0..<epochs {
             var shuffledSet = set.items.shuffled()
-            var error = Float.zero
+            error = Float.zero
             while !shuffledSet.isEmpty {
                 let batch = shuffledSet.prefix(batchSize)
                 for item in batch {
@@ -303,6 +304,7 @@ public class NeuralNetwork: Codable {
             }
             print("Epoch \(epoch+1), error \(error).")
         }
+        return error
     }
     
     public func predict(input: DataPiece) -> Int {

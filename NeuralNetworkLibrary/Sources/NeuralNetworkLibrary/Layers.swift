@@ -115,15 +115,15 @@ class Filter: Codable {
     var kernel: [Float]
     var delta: [Float]
     
-    func apply(to piece: [Float]) -> [Float] {
+    func apply(to piece: [Float]) -> Float {
         if piece.count != kernel.count {
             fatalError("Piece size must be equal kernel size.")
         }
-        var output = piece
-        output.withUnsafeMutableBufferPointer { outputPtr in
+        var output = Float.zero
+        piece.withUnsafeBufferPointer { piecePtr in
             kernel.withUnsafeBufferPointer { kernelPtr in
-                DispatchQueue.concurrentPerform(iterations: outputPtr.count, execute: { i in
-                    outputPtr[i] *= kernelPtr[i]
+                DispatchQueue.concurrentPerform(iterations: piecePtr.count, execute: { i in
+                    output += piecePtr[i] * kernelPtr[i]
                 })
             }
         }
@@ -226,44 +226,28 @@ public class Convolutional2D: Layer {
         
         let inputSize = lastInput!.size
         let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1, depth: filters.count*inputSize.depth!)
-        var tempOutput = Array(repeating: Array(repeating: Array(repeating: Float.zero, count: outputSize.depth!), count: outputSize.width), count: outputSize.height!)
-        var flat = Array(repeating: Float.zero, count: outputSize.width*outputSize.height!*outputSize.depth!)
-        tempOutput.withUnsafeMutableBufferPointer { outputPtr in
+        output = DataPiece(size: outputSize, body: Array(repeating: Float.zero, count: outputSize.width*outputSize.height!*outputSize.depth!))
+        output!.body.withUnsafeMutableBufferPointer { outputPtr in
             filters.withUnsafeBufferPointer { filtersPtr in
                 DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { outY in
                     let tempY = outY * stride
-                    //outputPtr[outY].withUnsafeMutableBufferPointer { outputRowPtr in
-                        DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
-                            let tempX = outX * stride
-                            //outputRowPtr[outX].withUnsafeMutableBufferPointer { outputCellPtr in
-                                DispatchQueue.concurrentPerform(iterations: filtersPtr.count, execute: { i in
-                                    DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
-                                        var piece = Array(repeating: Float.zero, count: kernelSize*kernelSize)
-                                        for y in tempY ..< tempY + kernelSize {
-                                            for x in tempX ..< tempX + kernelSize {
-                                                piece[(y-tempY)*kernelSize+x-tempX] = lastInput!.get(x: x, y: y, z: j)
-                                            }
-                                        }
-                                        outputPtr[outY][outX][i*inputSize.depth! + j] = function.activation(input: filtersPtr[i].apply(to: piece).reduce(0, +))
-                                    })
-                                })
-                            //}
-                        })
-                    //}
-                })
-            }
-            flat.withUnsafeMutableBufferPointer { flatPtr in
-                DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { i in
-                    DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { j in
-                        DispatchQueue.concurrentPerform(iterations: outputSize.depth!, execute: { m in
-                            let val = outputPtr[i][j][m]
-                            flatPtr[i*outputSize.width*outputSize.depth!+j*outputSize.depth!+m] = val
+                    DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
+                        let tempX = outX * stride
+                        DispatchQueue.concurrentPerform(iterations: filtersPtr.count, execute: { i in
+                            DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
+                                var piece = Array(repeating: Float.zero, count: kernelSize*kernelSize)
+                                for y in tempY ..< tempY + kernelSize {
+                                    for x in tempX ..< tempX + kernelSize {
+                                        piece[(y-tempY)*kernelSize+x-tempX] = lastInput!.get(x: x, y: y, z: j)
+                                    }
+                                }
+                                outputPtr[outY*outputSize.width*outputSize.depth!+outX*outputSize.depth!+i*inputSize.depth!+j] = function.activation(input: filtersPtr[i].apply(to: piece))
+                            })
                         })
                     })
                 })
             }
         }
-        self.output = DataPiece(size: outputSize, body: flat)
         return self.output!
     }
     
@@ -272,29 +256,28 @@ public class Convolutional2D: Layer {
             fatalError("Backward propagation executed before forward propagation.")
         }
         let inputSize = lastInput.size
-        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1)
+        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1, depth: filters.count*inputSize.depth!)
         var resizedInput = input
         for i in 0..<resizedInput.body.count {
             resizedInput.body[i] = function.derivative(output: resizedInput.body[i])
         }
         resizedInput.size = outputSize
-        var output = Array(repeating: [[Float]](), count: filters.count)
+        var output = Array(repeating: Float.zero, count: outputSize.width * outputSize.height! * outputSize.depth!)
         filters.withUnsafeBufferPointer { filtersPtr in
             output.withUnsafeMutableBufferPointer { outputPtr in
                 filterErrors.withUnsafeMutableBufferPointer { filterErrorsPtr in
-                    DispatchQueue.concurrentPerform(iterations: filters.count, execute: { filter in
+                    DispatchQueue.concurrentPerform(iterations: filtersPtr.count, execute: { filter in
                         filtersPtr[filter].kernel.withUnsafeBufferPointer { kernelPtr in
                             var error = Float.zero
-                            var filterOutput = Array(repeating: Array(repeating: Float.zero, count: inputSize.height!), count: inputSize.width)
-                            filterOutput.withUnsafeMutableBufferPointer { filterOutputPtr in
-                                DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { outY in
-                                    let tempY = outY * stride
-                                    DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
-                                        let tempX = outX * stride
+                            DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { outY in
+                                let tempY = outY * stride
+                                DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
+                                    let tempX = outX * stride
+                                    DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
                                         var piece = Array(repeating: Float.zero, count: kernelSize*kernelSize)
                                         for y in tempY ..< tempY + kernelSize {
                                             for x in tempX ..< tempX + kernelSize {
-                                                piece[(y-tempY)*kernelSize+x-tempX] = lastInput.get(x: x, y: y)
+                                                piece[(y-tempY)*kernelSize+x-tempX] = lastInput.get(x: x, y: y, z: j)
                                             }
                                         }
                                         error += piece.reduce(0, +) * resizedInput.get(x: outX, y: outY)
@@ -305,26 +288,25 @@ public class Convolutional2D: Layer {
                                         let cof = resizedInput.get(x: outX, y: outY)
                                         for y in tempY ..< tempY + kernelSize {
                                             for x in tempX ..< tempX + kernelSize {
-                                                filterOutputPtr[y][x] += cof * kernelPtr[(y-tempY)*kernelSize+x-tempX]
+                                                outputPtr[outY*outputSize.width*outputSize.depth!+outX*outputSize.depth!+filter*inputSize.depth!+j] += cof * kernelPtr[(y-tempY)*kernelSize+x-tempX]
                                             }
                                         }
                                     })
                                 })
-                            }
+                            })
                             filterErrorsPtr[filter] = error
-                            outputPtr[filter] = filterOutput
                         }
                     })
                 }
             }
         }
-        return DataPiece(size: .init(width: output[0].count, height: output[0][0].count, depth: filters.count), body: output.flatMap { $0.flatMap { $0 } })
+        return DataPiece(size: .init(width: inputSize.height!, height: inputSize.width, depth: filters.count*inputSize.depth!), body: output)
     }
     
     override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
         for i in 0..<filters.count {
             for j in 0..<filters[i].kernel.count {
-                    filters[i].delta[j] += learningRate * filterErrors[i]
+                filters[i].delta[j] += learningRate * filterErrors[i]
             }
         }
         return output!

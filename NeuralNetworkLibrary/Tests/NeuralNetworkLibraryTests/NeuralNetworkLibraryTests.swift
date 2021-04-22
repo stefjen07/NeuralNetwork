@@ -60,7 +60,7 @@
             var input = Array(repeating: Float.random(in: -20...20), count: size*size)
             measure {
                 for _ in 0..<100 {
-                    input = filter.apply(to: input)
+                    filter.apply(to: input)
                 }
             }
         }
@@ -76,5 +76,28 @@
             XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.plain.rawValue).activation(input: val), Plain().activation(input: val))
             XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.reLU.rawValue).activation(input: val), ReLU().activation(input: val))
             XCTAssertEqual(getActivationFunction(rawValue: ActivationFunctionRaw.sigmoid.rawValue).activation(input: val), Sigmoid().activation(input: val))
+        }
+        
+        func testTrain() throws {
+            let network = NeuralNetwork()
+            network.learningRate = 0.5
+            network.epochs = 1000
+            network.layers = [
+                Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .sigmoid),
+                Flatten(inputSize: 4),
+                Dense(inputSize: 4, neuronsCount: 6, functionRaw: .sigmoid),
+                Dense(inputSize: 6, neuronsCount: 2, functionRaw: .sigmoid)
+            ]
+            
+            let set = Dataset(items: [
+                DataItem(input: [0.0, 0.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
+                DataItem(input: [0.0, 0.0, 0.0, 1.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 0).body, outputSize: .init(width: 2)),
+                DataItem(input: [0.0, 0.0, 1.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
+                DataItem(input: [0.0, 1.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
+                DataItem(input: [1.0, 0.0, 0.0, 0.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 1).body, outputSize: .init(width: 2)),
+                DataItem(input: [1.0, 1.0, 1.0, 1.0], inputSize: .init(width: 2, height: 2), output: classifierOutput(classes: 2, correct: 0).body, outputSize: .init(width: 2))
+            ])
+            
+            XCTAssertLessThan(network.train(set: set), 0.0045)
         }
     }
