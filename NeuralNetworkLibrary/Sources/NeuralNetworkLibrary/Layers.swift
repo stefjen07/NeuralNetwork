@@ -20,6 +20,7 @@ public struct LayerWrapper: Codable {
         case dropout
         case conv2d
         case flatten
+        case pooling2d
     }
     
     init(_ layer: Layer) {
@@ -41,6 +42,9 @@ public struct LayerWrapper: Codable {
         case let payload as Flatten:
             try container.encode(Base.flatten, forKey: .base)
             try container.encode(payload, forKey: .payload)
+        case let payload as Pooling2D:
+            try container.encode(Base.pooling2d, forKey: .base)
+            try container.encode(payload, forKey: .payload)
         default:
             fatalError()
         }
@@ -59,6 +63,8 @@ public struct LayerWrapper: Codable {
             self.layer = try container.decode(Convolutional2D.self, forKey: .payload)
         case .flatten:
             self.layer = try container.decode(Flatten.self, forKey: .payload)
+        case .pooling2d:
+            self.layer = try container.decode(Pooling2D.self, forKey: .payload)
         }
     }
 
@@ -66,8 +72,8 @@ public struct LayerWrapper: Codable {
 
 public class Layer: Codable {
     var neurons: [Neuron] = []
-    var function: ActivationFunction
-    var output: DataPiece?
+    fileprivate var function: ActivationFunction
+    fileprivate var output: DataPiece?
     
     private enum CodingKeys: String, CodingKey {
         case neurons
@@ -106,7 +112,7 @@ public class Layer: Codable {
         return
     }
     
-    public init(function: ActivationFunction) {
+    fileprivate init(function: ActivationFunction) {
         self.function = function
     }
 }
@@ -114,21 +120,6 @@ public class Layer: Codable {
 class Filter: Codable {
     var kernel: [Float]
     var delta: [Float]
-    
-    func apply(to piece: [Float]) -> Float {
-        if piece.count != kernel.count {
-            fatalError("Piece size must be equal kernel size.")
-        }
-        var output = Float.zero
-        piece.withUnsafeBufferPointer { piecePtr in
-            kernel.withUnsafeBufferPointer { kernelPtr in
-                DispatchQueue.concurrentPerform(iterations: piecePtr.count, execute: { i in
-                    output += piecePtr[i] * kernelPtr[i]
-                })
-            }
-        }
-        return output
-    }
     
     public init(kernelSize: Int) {
         kernel = []
@@ -234,21 +225,23 @@ public class Convolutional2D: Layer {
                     DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
                         let tempX = outX * stride
                         DispatchQueue.concurrentPerform(iterations: filtersPtr.count, execute: { i in
-                            DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
-                                var piece = Array(repeating: Float.zero, count: kernelSize*kernelSize)
-                                for y in tempY ..< tempY + kernelSize {
-                                    for x in tempX ..< tempX + kernelSize {
-                                        piece[(y-tempY)*kernelSize+x-tempX] = lastInput!.get(x: x, y: y, z: j)
+                            filtersPtr[i].kernel.withUnsafeBufferPointer { kernelPtr in
+                                DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
+                                    var piece = Float.zero
+                                    for y in tempY ..< tempY + kernelSize {
+                                        for x in tempX ..< tempX + kernelSize {
+                                            piece += kernelPtr[(y-tempY)*kernelSize+x-tempX] * lastInput!.get(x: x, y: y, z: j)
+                                        }
                                     }
-                                }
-                                outputPtr[outY*outputSize.width*outputSize.depth!+outX*outputSize.depth!+i*inputSize.depth!+j] = function.activation(input: filtersPtr[i].apply(to: piece))
-                            })
+                                    outputPtr[outY*outputSize.width*outputSize.depth!+outX*outputSize.depth!+i*inputSize.depth!+j] = function.activation(input: piece)
+                                })
+                            }
                         })
                     })
                 })
             }
         }
-        return self.output!
+        return output!
     }
     
     override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
@@ -274,13 +267,13 @@ public class Convolutional2D: Layer {
                                 DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
                                     let tempX = outX * stride
                                     DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { j in
-                                        var piece = Array(repeating: Float.zero, count: kernelSize*kernelSize)
+                                        var piece = Float.zero
                                         for y in tempY ..< tempY + kernelSize {
                                             for x in tempX ..< tempX + kernelSize {
-                                                piece[(y-tempY)*kernelSize+x-tempX] = lastInput.get(x: x, y: y, z: j)
+                                                piece += lastInput.get(x: x, y: y, z: j)
                                             }
                                         }
-                                        error += piece.reduce(0, +) * resizedInput.get(x: outX, y: outY)
+                                        error += piece * resizedInput.get(x: outX, y: outY)
                                         var tempKernel = filtersPtr[filter].kernel
                                         for i in 0..<tempKernel.count {
                                             tempKernel[i] *= resizedInput.get(x: outX, y: outY)
@@ -322,6 +315,133 @@ public class Convolutional2D: Layer {
     
 }
 
+public enum PoolingMode: Int {
+    case average = 0
+    case max
+}
+
+public class Pooling2D: Layer {
+    var kernelSize: Int
+    var stride: Int
+    var mode: PoolingMode
+    private var lastInput: DataPiece?
+    
+    private enum CodingKeys: String, CodingKey {
+        case kernelSize
+        case stride
+        case mode
+    }
+    
+    public init(kernelSize: Int, stride: Int, mode: PoolingMode, functionRaw: ActivationFunctionRaw) {
+        let function = getActivationFunction(rawValue: functionRaw.rawValue)
+        self.kernelSize = kernelSize
+        self.stride = stride
+        self.mode = mode
+        super.init(function: function)
+    }
+    
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kernelSize = try container.decode(Int.self, forKey: .kernelSize)
+        stride = try container.decode(Int.self, forKey: .stride)
+        mode = PoolingMode(rawValue: try container.decode(Int.self, forKey: .mode)) ?? .average
+        try super.init(from: decoder)
+    }
+    
+    public override func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kernelSize, forKey: .kernelSize)
+        try container.encode(stride, forKey: .stride)
+        try container.encode(mode.rawValue, forKey: .mode)
+        try super.encode(to: encoder)
+    }
+    
+    override func forward(input: DataPiece, dropoutEnabled: Bool) -> DataPiece {
+        lastInput = input
+        if input.size.type == .twoD {
+            lastInput?.size = DataSize(width: input.size.width, height: input.size.height!, depth: 1)
+        } else if input.size.type == .oneD {
+            fatalError("Pooling 2D input must be at least two-dimensional.")
+        }
+        
+        let inputSize = lastInput!.size
+        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1, depth: inputSize.depth!)
+        output = DataPiece(size: outputSize, body: Array(repeating: Float.zero, count: outputSize.width*outputSize.height!*outputSize.depth!))
+        output!.body.withUnsafeMutableBufferPointer { outputPtr in
+            DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { outY in
+                let tempY = outY * stride
+                DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
+                    let tempX = outX * stride
+                    DispatchQueue.concurrentPerform(iterations: inputSize.depth!, execute: { i in
+                        var piece = mode == .max ? lastInput!.get(x: tempX, y: tempY, z: i) : Float.zero
+                        for y in tempY ..< tempY + kernelSize {
+                            for x in tempX ..< tempX + kernelSize {
+                                if mode == .max {
+                                    piece = max(piece, lastInput!.get(x: x, y: y, z: i))
+                                } else {
+                                    piece += lastInput!.get(x: x, y: y, z: i)
+                                }
+                            }
+                        }
+                        if mode == .average {
+                            piece /= Float(kernelSize * kernelSize)
+                        }
+                        outputPtr[outY*outputSize.width*outputSize.depth!+outX*outputSize.depth!+i] = function.activation(input: piece)
+                    })
+                })
+            })
+        }
+        return output!
+    }
+    
+    override func backward(input: DataPiece, previous: Layer?) -> DataPiece {
+        guard let lastInput = lastInput else {
+            fatalError("Backward propagation executed before forward propagation.")
+        }
+        let inputSize = lastInput.size
+        let outputSize = DataSize(width: (inputSize.width - kernelSize) / stride + 1, height: (inputSize.height! - kernelSize) / stride + 1, depth: inputSize.depth!)
+        var resizedInput = input
+        for i in 0..<resizedInput.body.count {
+            resizedInput.body[i] = function.derivative(output: resizedInput.body[i])
+        }
+        resizedInput.size = outputSize
+        output = DataPiece(size: inputSize, body: Array(repeating: Float.zero, count: inputSize.width*inputSize.height!*inputSize.depth!))
+        output!.body.withUnsafeMutableBufferPointer { outputPtr in
+            DispatchQueue.concurrentPerform(iterations: outputSize.height!, execute: { outY in
+                let tempY = outY * stride
+                DispatchQueue.concurrentPerform(iterations: outputSize.width, execute: { outX in
+                    let tempX = outX * stride
+                    DispatchQueue.concurrentPerform(iterations: outputSize.depth!, execute: { j in
+                        let val = resizedInput.get(x: outX, y: outY, z: j) / Float(kernelSize * kernelSize)
+                        if mode == .average {
+                            for y in tempY ..< tempY + kernelSize {
+                                for x in tempX ..< tempX + kernelSize {
+                                    outputPtr[y*inputSize.width*inputSize.depth!+x*inputSize.depth!+j] += val
+                                }
+                            }
+                        } else {
+                            var maxV = lastInput.get(x: tempX, y: tempY, z: j)
+                            for y in tempY ..< tempY + kernelSize {
+                                for x in tempX ..< tempX + kernelSize {
+                                    maxV = max(maxV, lastInput.get(x: x, y: y, z: j))
+                                }
+                            }
+                            for y in tempY ..< tempY + kernelSize {
+                                for x in tempX ..< tempX + kernelSize {
+                                    if lastInput.get(x: x, y: y, z: j) == maxV {
+                                        outputPtr[y*inputSize.width*inputSize.depth!+x*inputSize.depth!+j] += val
+                                    }
+                                }
+                            }
+                        }
+                    })
+                })
+            })
+        }
+        return output!
+    }
+}
+
 public class Dense: Layer {
     
     private let queue = DispatchQueue.global(qos: .userInitiated)
@@ -340,28 +460,24 @@ public class Dense: Layer {
         }
     }
     
-    private enum CodingKeys: String, CodingKey {
-        case output
-    }
-    
-    public override func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(output, forKey: .output)
-        try super.encode(to: encoder)
-    }
-    
     public required init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
         try super.init(from: decoder)
-        output = try container.decode(DataPiece.self, forKey: .output)
     }
     
     override func forward(input: DataPiece, dropoutEnabled: Bool) -> DataPiece {
-        output?.body.withUnsafeMutableBufferPointer { outputPtr in
-            neurons.withUnsafeBufferPointer { neuronsPtr in
-                DispatchQueue.concurrentPerform(iterations: neuronsPtr.count, execute: { i in
-                    outputPtr[i] = function.activation(input: outNeuron(neuronsPtr[i], input: input.body))
-                })
+        input.body.withUnsafeBufferPointer { inputPtr in
+            output?.body.withUnsafeMutableBufferPointer { outputPtr in
+                neurons.withUnsafeBufferPointer { neuronsPtr in
+                    DispatchQueue.concurrentPerform(iterations: neuronsPtr.count, execute: { i in
+                        var out = neuronsPtr[i].bias
+                        neuronsPtr[i].weights.withUnsafeBufferPointer { weightsPtr in
+                            DispatchQueue.concurrentPerform(iterations: neuronsPtr[i].weights.count, execute: { i in
+                                out += weightsPtr[i] * inputPtr[i]
+                            })
+                        }
+                        outputPtr[i] = function.activation(input: out)
+                    })
+                }
             }
         }
         return output!
@@ -387,13 +503,11 @@ public class Dense: Layer {
     }
     
     override func deltaWeights(input: DataPiece, learningRate: Float) -> DataPiece {
-        let neuronsCount = neurons.count
         neurons.withUnsafeMutableBufferPointer { neuronsPtr in
             input.body.withUnsafeBufferPointer { inputPtr in
-                DispatchQueue.concurrentPerform(iterations: neuronsCount, execute: { i in
+                DispatchQueue.concurrentPerform(iterations: neuronsPtr.count, execute: { i in
                     neuronsPtr[i].weightsDelta.withUnsafeMutableBufferPointer { deltaPtr in
-                        let weightsCount = deltaPtr.count
-                        DispatchQueue.concurrentPerform(iterations: weightsCount, execute: { j in
+                        DispatchQueue.concurrentPerform(iterations: deltaPtr.count, execute: { j in
                             deltaPtr[j] += learningRate * neuronsPtr[i].delta * inputPtr[j]
                         })
                         neuronsPtr[i].bias += learningRate * neuronsPtr[i].delta
@@ -424,7 +538,7 @@ public class Dense: Layer {
 }
 
 public class Dropout: Layer {
-    var probability: Float
+    var probability: Int
     var cache: [Bool]
     
     private enum CodingKeys: String, CodingKey {
@@ -439,7 +553,7 @@ public class Dropout: Layer {
         try super.encode(to: encoder)
     }
     
-    public init(inputSize: Int, probability: Float) {
+    public init(inputSize: Int, probability: Int) {
         self.probability = probability
         self.cache = Array(repeating: true, count: inputSize)
         super.init(function: Plain())
@@ -452,7 +566,7 @@ public class Dropout: Layer {
     
     public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.probability = try container.decode(Float.self, forKey: .probability)
+        self.probability = try container.decode(Int.self, forKey: .probability)
         self.cache = try container.decode([Bool].self, forKey: .cache)
         try super.init(from: decoder)
     }
@@ -463,7 +577,7 @@ public class Dropout: Layer {
             cache.withUnsafeMutableBufferPointer { cachePtr in
                 output?.body.withUnsafeMutableBufferPointer { outputPtr in
                     DispatchQueue.concurrentPerform(iterations: outputPtr.count, execute: { i in
-                        if Float.random(in: 0...1) < probability {
+                        if Int.random(in: 0...100) < probability {
                             cachePtr[i] = false
                             outputPtr[i] = 0
                         } else {
@@ -485,7 +599,7 @@ public class Dropout: Layer {
     }
 }
 
-func getActivationFunction(rawValue: Int) -> ActivationFunction {
+fileprivate func getActivationFunction(rawValue: Int) -> ActivationFunction {
     switch rawValue {
     case ActivationFunctionRaw.reLU.rawValue:
         return ReLU()
@@ -502,13 +616,13 @@ public enum ActivationFunctionRaw: Int {
     case plain
 }
 
-public protocol ActivationFunction: Codable {
+protocol ActivationFunction: Codable {
     var rawValue: Int { get }
     func activation(input: Float) -> Float
     func derivative(output: Float) -> Float
 }
 
-public struct Sigmoid: ActivationFunction, Codable {
+fileprivate struct Sigmoid: ActivationFunction, Codable {
     public var rawValue: Int = 0
     
     public func activation(input: Float) -> Float {
@@ -520,7 +634,7 @@ public struct Sigmoid: ActivationFunction, Codable {
     }
 }
 
-public struct ReLU: ActivationFunction, Codable {
+fileprivate struct ReLU: ActivationFunction, Codable {
     public var rawValue: Int = 1
     
     public func activation(input: Float) -> Float {
@@ -532,7 +646,7 @@ public struct ReLU: ActivationFunction, Codable {
     }
 }
 
-public struct Plain: ActivationFunction, Codable {
+fileprivate struct Plain: ActivationFunction, Codable {
     public var rawValue: Int = 2
     
     public func activation(input: Float) -> Float {
@@ -543,3 +657,9 @@ public struct Plain: ActivationFunction, Codable {
         return 1
     }
 }
+
+#if DEBUG
+func getActivationFunctionMirror(rawValue: Int) -> ActivationFunction {
+    getActivationFunction(rawValue: rawValue)
+}
+#endif

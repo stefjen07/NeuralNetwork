@@ -7,19 +7,6 @@
 
 import Foundation
 
-func outNeuron(_ neuron: Neuron, input: [Float]) -> Float {
-    var out = neuron.bias
-    let weightsCount = neuron.weights.count
-    input.withUnsafeBufferPointer { inputPtr in
-        neuron.weights.withUnsafeBufferPointer { weightsPtr in
-            DispatchQueue.concurrentPerform(iterations: weightsCount, execute: { i in
-                out += weightsPtr[i] * inputPtr[i]
-            })
-        }
-    }
-    return out
-}
-
 public enum DataSizeType: Int, Codable {
     case oneD = 1
     case twoD
@@ -97,12 +84,15 @@ public struct DataPiece: Codable, Equatable {
         var buffer = Array(repeating: UInt8.zero, count: totalBytes)
         let contextRef = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: 0)!
         contextRef.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let bufferPointer = UnsafeBufferPointer<UInt8>(start: &buffer, count: totalBytes)
         self.size = .init(width: width, height: height)
-        let pixelValues = Array<UInt8>(bufferPointer)
-        self.body = pixelValues.map { v in
-            return Float(v)/Float(UInt8.max)
+        var body = [Float]()
+        buffer.withUnsafeBufferPointer { bufferPtr in
+            let pixelValues = Array<UInt8>(bufferPtr)
+            body = pixelValues.map { v in
+                return Float(v)/Float(UInt8.max)
+            }
         }
+        self.body = body
     }
 }
 
@@ -197,7 +187,7 @@ public struct Dataset: Codable {
     }
 }
 
-public class NeuralNetwork: Codable {
+final public class NeuralNetwork: Codable {
     public var layers: [Layer] = []
     public var learningRate = Float(0.05)
     public var epochs = 30
@@ -310,7 +300,6 @@ public class NeuralNetwork: Codable {
     public func predict(input: DataPiece) -> Int {
         dropoutEnabled = false
         let output = forward(networkInput: input)
-        #warning("Add more output activation functions")
         var maxi = 0
         for i in 1..<output.body.count {
             if(output.body[i]>output.body[maxi]) {
@@ -320,14 +309,14 @@ public class NeuralNetwork: Codable {
         return maxi
     }
     
-    func deltaWeights(row: DataPiece) {
+    private func deltaWeights(row: DataPiece) {
         var input = row
         for i in 0..<layers.count {
             input = layers[i].deltaWeights(input: input, learningRate: learningRate)
         }
     }
     
-    func forward(networkInput: DataPiece) -> DataPiece {
+    private func forward(networkInput: DataPiece) -> DataPiece {
         var input = networkInput
         for i in 0..<layers.count {
             input = layers[i].forward(input: input, dropoutEnabled: dropoutEnabled)
@@ -335,7 +324,7 @@ public class NeuralNetwork: Codable {
         return input
     }
     
-    func backward(expected: DataPiece) {
+    private func backward(expected: DataPiece) {
         var input = expected
         var previous: Layer? = nil
         for i in (0..<layers.count).reversed() {

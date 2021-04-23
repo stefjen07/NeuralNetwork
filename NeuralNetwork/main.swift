@@ -11,7 +11,7 @@ import NeuralNetworkLibrary
 //Test ( inputSize = 3, outputSize = 2 )
 
 let usingFile = true
-let eraseFile = true
+let eraseFile = false
 let fileName = "testModel.nn"
 
 //cook()
@@ -24,10 +24,11 @@ if usingFile && !eraseFile {
     network.learningRate = 0.5
     network.epochs = 10
     network.layers = [
-        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .reLU),
-        Flatten(inputSize: 1024),
-        Dropout(inputSize: 1024, probability: 0.1),
-        Dense(inputSize: 1024, neuronsCount: 71, functionRaw: .reLU)
+        Convolutional2D(filters: 1, kernelSize: 1, stride: 1, functionRaw: .sigmoid),
+        Pooling2D(kernelSize: 2, stride: 1, mode: .max, functionRaw: .sigmoid),
+        Flatten(inputSize: 961),
+        Dropout(inputSize: 961, probability: 10),
+        Dense(inputSize: 961, neuronsCount: 46, functionRaw: .sigmoid)
     ]
 }
 
@@ -35,7 +36,7 @@ network.printSummary()
 
 var set = getDS()
 
-network.train(set: .init(items: .init(set.items.shuffled().dropFirst(16))))
+let _ = network.train(set: set)
 
 if usingFile {
     network.saveModel(fileName: fileName)

@@ -10,7 +10,7 @@ import NeuralNetworkLibrary
 
 func cook() {
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/etl.ds")
-    Dataset(folderPath: FileManager.default.currentDirectoryPath+"/ETL8G").save(to: url)
+    Dataset(folderPath: FileManager.default.currentDirectoryPath+"/Validation").save(to: url)
 }
 
 func getDS() -> Dataset {
